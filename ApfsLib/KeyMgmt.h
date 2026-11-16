@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 #include <string>
 #include <iosfwd>
 
 #include "Global.h"
+#include "DiskStruct.h"
 
 class ApfsContainer;
 
@@ -14,6 +16,18 @@ struct bagdata_t;
 struct key_header_t;
 struct kek_entry_t;
 struct vek_entry_t;
+
+struct ApfsKeybagEntryInfo
+{
+	std::string scope; // "container" or "volume"
+	std::string uuid;
+	uint16_t tag;
+	std::string tag_name;
+	uint16_t keylen;
+	std::string hint;
+	uint64_t pr_start_addr;
+	uint64_t pr_block_count;
+};
 
 class Keybag
 {
@@ -45,6 +59,7 @@ public:
 
 	bool GetPasswordHint(std::string &hint, const apfs_uuid_t &volume_uuid);
 	bool GetVolumeKey(uint8_t *vek, const apfs_uuid_t &volume_uuid, const char *password = nullptr);
+	bool GetKeybagInfo(std::vector<ApfsKeybagEntryInfo> &entries);
 
 	bool IsValid() const { return m_is_valid; }
 	bool IsUnencrypted() const { return m_is_unencrypted; }

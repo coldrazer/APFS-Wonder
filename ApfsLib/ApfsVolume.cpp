@@ -214,6 +214,87 @@ bool ApfsVolume::MountSnapshot(paddr_t apsb_paddr, xid_t snap_xid)
 	return true;
 }
 
+bool ApfsVolume::ListSnapshots(std::vector<ApfsSnapshotInfo> &snapshots)
+{
+	snapshots.clear();
+	if (m_sb.apfs_snap_meta_tree_oid == 0)
+		return true;
+
+	BTreeIterator it;
+	BTreeEntry bte;
+	if (!m_snap_meta_tree.GetIteratorBegin(it))
+		return false;
+
+	for (;;)
+	{
+		if (!it.GetEntry(bte))
+			break;
+
+		const j_snap_metadata_key_t *sme_k = reinterpret_cast<const j_snap_metadata_key_t *>(bte.key);
+		const j_snap_metadata_val_t *sme_v = reinterpret_cast<const j_snap_metadata_val_t *>(bte.val);
+		if ((sme_k->hdr.obj_id_and_type >> OBJ_TYPE_SHIFT) != APFS_TYPE_SNAP_METADATA)
+			break;
+
+		ApfsSnapshotInfo info;
+		info.snap_xid = sme_k->hdr.obj_id_and_type & OBJ_ID_MASK;
+		info.name = reinterpret_cast<const char *>(sme_v->name);
+		info.create_time = sme_v->create_time;
+		info.change_time = sme_v->change_time;
+		info.flags = sme_v->flags;
+		info.sblock_oid = sme_v->sblock_oid;
+		snapshots.push_back(info);
+
+		if (!it.next())
+			break;
+	}
+
+	return true;
+}
+
+bool ApfsVolume::GetIntegrityMeta(integrity_meta_phys_t &im, std::vector<uint8_t> &root_hash)
+{
+	root_hash.clear();
+	if (m_sb.apfs_integrity_meta_oid == 0)
+		return false;
+
+	omap_res_t om;
+	if (!m_omap.Lookup(om, m_sb.apfs_integrity_meta_oid, m_sb.apfs_o.o_xid))
+		return false;
+
+	std::vector<uint8_t> blk(m_container.GetBlocksize());
+	if (!ReadBlocks(blk.data(), om.paddr, 1, 0))
+		return false;
+	if (!VerifyBlock(blk.data(), blk.size()))
+		return false;
+
+	memcpy(&im, blk.data(), sizeof(integrity_meta_phys_t));
+
+	size_t hash_len = 0;
+	switch (im.im_hash_type)
+	{
+	case APFS_HASH_SHA256:
+	case APFS_HASH_SHA512_256:
+		hash_len = 32;
+		break;
+	case APFS_HASH_SHA384:
+		hash_len = 48;
+		break;
+	case APFS_HASH_SHA512:
+		hash_len = 64;
+		break;
+	default:
+		hash_len = 32;
+		break;
+	}
+
+	if (im.im_root_hash_offset > 0 && (im.im_root_hash_offset + hash_len) <= blk.size())
+	{
+		root_hash.assign(blk.data() + im.im_root_hash_offset, blk.data() + im.im_root_hash_offset + hash_len);
+	}
+
+	return true;
+}
+
 void ApfsVolume::dump(BlockDumper& bd)
 {
 	std::vector<uint8_t> blk;
@@ -369,6 +450,10 @@ bool ApfsVolume::ReadBlocks(uint8_t * data, paddr_t paddr, uint64_t blkcnt, uint
 
 int ApfsVolume::CompareSnapMetaKey(const void* skey, size_t skey_len, const void* ekey, size_t ekey_len, void* context)
 {
+	(void)skey_len;
+	(void)ekey_len;
+	(void)context;
+
 	const j_key_t *ks = reinterpret_cast<const j_key_t*>(skey);
 	const j_key_t *ke = reinterpret_cast<const j_key_t*>(ekey);
 	const j_snap_name_key_t *sks;

@@ -33,6 +33,19 @@
 class ApfsVolume;
 class BlockDumper;
 
+struct ApfsCheckpointInfo
+{
+	xid_t xid;
+	paddr_t paddr;
+	uint64_t next_oid;
+	uint32_t xp_desc_index;
+	uint32_t xp_desc_len;
+	uint32_t xp_data_index;
+	uint32_t xp_data_len;
+	uint64_t newest_mounted_version;
+	bool is_active;
+};
+
 class ApfsContainer
 {
 public:
@@ -43,13 +56,17 @@ public:
 
 	ApfsVolume *GetVolume(unsigned int fsid, const std::string &passphrase = std::string(), xid_t snap_xid = 0);
 	bool GetVolumeInfo(unsigned int fsid, apfs_superblock_t &apsb);
+	int FindVolumeByRole(uint16_t role, const apfs_uuid_t *group_id = nullptr);
+	bool ListCheckpoints(std::vector<ApfsCheckpointInfo> &checkpoints) const;
 
 	bool ReadBlocks(uint8_t *data, paddr_t paddr, uint64_t blkcnt = 1) const;
 	bool ReadAndVerifyHeaderBlock(uint8_t *data, paddr_t paddr) const;
 
 	uint32_t GetBlocksize() const { return m_nx.nx_block_size; }
 	uint64_t GetBlockCount() const { return m_nx.nx_block_count; }
-	uint64_t GetFreeBlocks() const { return m_sm->sm_dev[SD_MAIN].sm_free_count + m_sm->sm_dev[SD_TIER2].sm_free_count; }
+	uint64_t GetFreeBlocks() const { return m_sm ? (m_sm->sm_dev[SD_MAIN].sm_free_count + m_sm->sm_dev[SD_TIER2].sm_free_count) : 0; }
+	const nx_superblock_t &GetSuperblock() const { return m_nx; }
+	KeyManager &GetKeyManager() { return m_keymgr; }
 
 	bool GetVolumeKey(uint8_t *key, const apfs_uuid_t &vol_uuid, const char *password = nullptr);
 	bool GetPasswordHint(std::string &hint, const apfs_uuid_t &vol_uuid);

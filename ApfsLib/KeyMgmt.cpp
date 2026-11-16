@@ -145,7 +145,6 @@ void Keybag::dump(std::ostream &st, Keybag *cbag, const apfs_uuid_t &vuuid)
 	size_t s;
 	size_t k;
 	const keybag_entry_t *ke;
-	bagdata_t bd;
 	const char *typestr;
 
 	st << "Dumping Keybag (" << (cbag ? "recs" : "keys") << ")" << endl;
@@ -466,7 +465,6 @@ bool KeyManager::GetVolumeKey(uint8_t* vek, const apfs_uuid_t& volume_uuid, cons
 	bool rc = false;
 	const keybag_entry_t *ke_kek;
 	const keybag_entry_t *ke_vek;
-	bagdata_t bd;
 	kek_entry_t keke;
 	vek_entry_t veke;
 	AES::Mode kek_mode = AES::AES_256;
@@ -605,6 +603,89 @@ void KeyManager::dump(std::ostream &st)
 
 	st.fill(ch);
 	st.setf(fl);
+}
+
+bool KeyManager::GetKeybagInfo(std::vector<ApfsKeybagEntryInfo> &entries)
+{
+	entries.clear();
+	if (!m_is_valid)
+		return false;
+
+	size_t s = m_container_bag.GetKeyCnt();
+	for (size_t k = 0; k < s; k++)
+	{
+		const keybag_entry_t *ke = m_container_bag.GetKey(k);
+		if (!ke)
+			continue;
+
+		ApfsKeybagEntryInfo info;
+		info.scope = "container";
+		info.uuid = uuidstr(ke->ke_uuid);
+		info.tag = ke->ke_tag;
+		info.keylen = ke->ke_keylen;
+		info.pr_start_addr = 0;
+		info.pr_block_count = 0;
+
+		switch (ke->ke_tag)
+		{
+		case KB_TAG_VOLUME_KEY:
+			info.tag_name = "VEK";
+			break;
+		case KB_TAG_VOLUME_UNLOCK_RECORDS:
+			info.tag_name = "Keybag_Ref";
+			if (ke->ke_keylen == sizeof(prange_t))
+			{
+				const prange_t *pr = reinterpret_cast<const prange_t *>(ke->ke_keydata);
+				info.pr_start_addr = pr->pr_start_addr;
+				info.pr_block_count = pr->pr_block_count;
+			}
+			break;
+		default:
+			info.tag_name = "Unknown";
+			break;
+		}
+		entries.push_back(info);
+
+		if (ke->ke_tag == KB_TAG_VOLUME_UNLOCK_RECORDS && ke->ke_keylen == sizeof(prange_t))
+		{
+			const prange_t *pr = reinterpret_cast<const prange_t *>(ke->ke_keydata);
+			Keybag recs_bag;
+			if (LoadKeybag(recs_bag, APFS_VOL_KEYBAG_OBJ, pr->pr_start_addr, pr->pr_block_count, ke->ke_uuid))
+			{
+				size_t rs = recs_bag.GetKeyCnt();
+				for (size_t rk = 0; rk < rs; rk++)
+				{
+					const keybag_entry_t *rke = recs_bag.GetKey(rk);
+					if (!rke)
+						continue;
+
+					ApfsKeybagEntryInfo rinfo;
+					rinfo.scope = "volume";
+					rinfo.uuid = uuidstr(rke->ke_uuid);
+					rinfo.tag = rke->ke_tag;
+					rinfo.keylen = rke->ke_keylen;
+					rinfo.pr_start_addr = 0;
+					rinfo.pr_block_count = 0;
+					switch (rke->ke_tag)
+					{
+					case KB_TAG_VOLUME_UNLOCK_RECORDS:
+						rinfo.tag_name = "KEK";
+						break;
+					case KB_TAG_VOLUME_PASSPHRASE_HINT:
+						rinfo.tag_name = "Passphrase_Hint";
+						rinfo.hint.assign(reinterpret_cast<const char *>(rke->ke_keydata), rke->ke_keylen);
+						break;
+					default:
+						rinfo.tag_name = "Unknown";
+						break;
+					}
+					entries.push_back(rinfo);
+				}
+			}
+		}
+	}
+
+	return true;
 }
 
 bool KeyManager::LoadKeybag(Keybag& bag, uint32_t type, uint64_t block, uint64_t blockcnt, const apfs_uuid_t& uuid)

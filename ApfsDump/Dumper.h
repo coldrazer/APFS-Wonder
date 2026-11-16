@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
 #include <vector>
 #include <iosfwd>
 
+#include <ApfsLib/DiskStruct.h>
 #include <Crypto/AesXts.h>
 
 extern volatile bool g_abort; // In Apfs.cpp

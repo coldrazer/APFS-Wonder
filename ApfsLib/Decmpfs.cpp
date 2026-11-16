@@ -23,7 +23,9 @@
 #include <cassert>
 
 #include "Decmpfs.h"
+#include "ApfsVolume.h"
 #include "Endian.h"
+#include "LruCache.h"
 
 #include "Global.h"
 #include "Util.h"
@@ -87,6 +89,13 @@ bool IsDecompAlgoInRsrc(uint16_t algo)
 
 bool DecompressFile(ApfsDir &dir, uint64_t ino, std::vector<uint8_t> &decompressed, const std::vector<uint8_t> &compressed)
 {
+	const uint64_t vol_tag = dir.GetVolume().getVolumeTag();
+	if (auto cached = ApfsDecompCache::Instance().Get(vol_tag, ino))
+	{
+		decompressed = *cached;
+		return true;
+	}
+
 	if (compressed.size() < sizeof(CompressionHeader))
 		return false;
 
@@ -236,9 +245,12 @@ bool DecompressFile(ApfsDir &dir, uint64_t ino, std::vector<uint8_t> &decompress
 					decoded_bytes = src_len - 1;
 					break;
 				case 12:
-					// Assuming ...
-					decoded_bytes = DecompressLZFSE(decompressed.data() + (k << 16), expected_len, src, src_len);
-					// TODO is there also an uncompressed variant?
+					if ((src[0] == 0x06 || src[0] == 0xFF) && src_len == expected_len + 1) {
+						memcpy(decompressed.data() + (k << 16), src + 1, src_len - 1);
+						decoded_bytes = src_len - 1;
+					} else {
+						decoded_bytes = DecompressLZFSE(decompressed.data() + (k << 16), expected_len, src, src_len);
+					}
 					break;
 				case 14:
 					if (src[0] == 0xFF) {
@@ -299,8 +311,12 @@ bool DecompressFile(ApfsDir &dir, uint64_t ino, std::vector<uint8_t> &decompress
 			break;
 
 		case 11:
-			// TODO uncompressed variant?
-			decoded_bytes = DecompressLZFSE(decompressed.data(), decompressed.size(), cdata, csize);
+			if ((cdata[0] == 0x06 || cdata[0] == 0xFF) && hdr->size == csize - 1) {
+				decompressed.assign(cdata + 1, cdata + csize);
+				decoded_bytes = decompressed.size();
+			} else {
+				decoded_bytes = DecompressLZFSE(decompressed.data(), decompressed.size(), cdata, csize);
+			}
 			break;
 
 		case 13:
@@ -337,5 +353,6 @@ bool DecompressFile(ApfsDir &dir, uint64_t ino, std::vector<uint8_t> &decompress
 	}
 #endif
 
+	ApfsDecompCache::Instance().Put(vol_tag, ino, decompressed);
 	return true;
 }

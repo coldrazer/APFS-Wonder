@@ -17,6 +17,7 @@
 	along with apfs-fuse.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <fstream>
@@ -44,6 +45,8 @@ ApfsContainer::ApfsContainer(Device *disk_main, uint64_t main_start, uint64_t ma
 	m_fq_tree_vol(*this),
 	m_keymgr(*this)
 {
+	(void)m_main_part_len;
+	(void)m_tier2_part_len;
 	m_sm = nullptr;
 }
 
@@ -262,6 +265,75 @@ bool ApfsContainer::GetVolumeInfo(unsigned int fsid, apfs_superblock_t& apsb)
 	memcpy(&apsb, apsb_raw.data(), sizeof(apfs_superblock_t));
 
 	return true;
+}
+
+int ApfsContainer::FindVolumeByRole(uint16_t role, const apfs_uuid_t *group_id)
+{
+	apfs_superblock_t apsb;
+	static const apfs_uuid_t zero_uuid = {};
+
+	for (unsigned int fsid = 0; fsid < NX_MAX_FILE_SYSTEMS; fsid++)
+	{
+		if (!GetVolumeInfo(fsid, apsb))
+			continue;
+
+		if (apsb.apfs_role != role)
+			continue;
+
+		if (group_id && memcmp(*group_id, zero_uuid, sizeof(apfs_uuid_t)) != 0)
+		{
+			if (memcmp(apsb.apfs_volume_group_id, *group_id, sizeof(apfs_uuid_t)) != 0)
+				continue;
+		}
+
+		return static_cast<int>(fsid);
+	}
+
+	return -1;
+}
+
+bool ApfsContainer::ListCheckpoints(std::vector<ApfsCheckpointInfo> &checkpoints) const
+{
+	checkpoints.clear();
+	if (m_nx.nx_block_size == 0)
+		return false;
+
+	std::vector<uint8_t> tmp(m_nx.nx_block_size);
+
+	for (paddr_t paddr = m_nx.nx_xp_desc_base; paddr < (m_nx.nx_xp_desc_base + m_nx.nx_xp_desc_blocks); paddr++)
+	{
+		if (!ReadBlocks(tmp.data(), paddr, 1))
+			continue;
+
+		if (!VerifyBlock(tmp.data(), tmp.size()))
+			continue;
+
+		const nx_superblock_t *sb = reinterpret_cast<const nx_superblock_t *>(tmp.data());
+		if ((sb->nx_o.o_type & OBJECT_TYPE_MASK) != OBJECT_TYPE_NX_SUPERBLOCK)
+			continue;
+		if (sb->nx_magic != NX_MAGIC)
+			continue;
+
+		ApfsCheckpointInfo info;
+		info.xid = sb->nx_o.o_xid;
+		info.paddr = paddr;
+		info.next_oid = sb->nx_next_oid;
+		info.xp_desc_index = sb->nx_xp_desc_index;
+		info.xp_desc_len = sb->nx_xp_desc_len;
+		info.xp_data_index = sb->nx_xp_data_index;
+		info.xp_data_len = sb->nx_xp_data_len;
+		info.newest_mounted_version = sb->nx_newest_mounted_version;
+		info.is_active = (sb->nx_o.o_xid == m_nx.nx_o.o_xid);
+		checkpoints.push_back(info);
+	}
+
+	std::sort(checkpoints.begin(), checkpoints.end(), [](const ApfsCheckpointInfo &a, const ApfsCheckpointInfo &b) {
+		if (a.xid != b.xid)
+			return a.xid < b.xid;
+		return a.paddr < b.paddr;
+	});
+
+	return !checkpoints.empty();
 }
 
 

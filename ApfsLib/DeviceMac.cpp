@@ -58,7 +58,8 @@ bool DeviceMac::Open(const char* name)
 
 	fstat(m_device, &st);
 
-	std::cout << "st_mode = " << st.st_mode << std::endl;
+	if (g_debug & Dbg_Info)
+		std::cout << "st_mode = " << st.st_mode << std::endl;
 
 	if (S_ISREG(st.st_mode))
 	{
@@ -74,8 +75,11 @@ bool DeviceMac::Open(const char* name)
 
 		m_size = sector_size * sector_count;
 
-		std::cout << "Sector count = " << sector_count << std::endl;
-		std::cout << "Sector size  = " << sector_size << std::endl;
+		if (g_debug & Dbg_Info)
+		{
+			std::cout << "Sector count = " << sector_count << std::endl;
+			std::cout << "Sector size  = " << sector_size << std::endl;
+		}
 	}
 	else
 	{

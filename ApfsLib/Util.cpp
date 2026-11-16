@@ -20,6 +20,8 @@
 #include "Unicode.h"
 
 #include <cassert>
+#include <cstdarg>
+#include <cstring>
 
 #include <iostream>
 #include <iomanip>

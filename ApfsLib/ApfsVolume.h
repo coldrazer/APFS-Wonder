@@ -20,6 +20,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include "DiskStruct.h"
 #include "ApfsNodeMapperBTree.h"
@@ -28,6 +30,16 @@
 
 class ApfsContainer;
 class BlockDumper;
+
+struct ApfsSnapshotInfo
+{
+	xid_t snap_xid;
+	std::string name;
+	uint64_t create_time;
+	uint64_t change_time;
+	uint32_t flags;
+	oid_t sblock_oid;
+};
 
 class ApfsVolume
 {
@@ -39,11 +51,17 @@ public:
 	bool MountSnapshot(paddr_t apsb_paddr, xid_t snap_xid);
 
 	const char *name() const { return reinterpret_cast<const char *>(m_sb.apfs_volname); }
+	const apfs_superblock_t &getSuperblock() const { return m_sb; }
+	uint64_t getVolumeTag() const { return (static_cast<uint64_t>(m_apsb_paddr) << 24) ^ static_cast<uint64_t>(m_sb.apfs_o.o_xid); }
+
+	bool ListSnapshots(std::vector<ApfsSnapshotInfo> &snapshots);
+	bool GetIntegrityMeta(integrity_meta_phys_t &im, std::vector<uint8_t> &root_hash);
 
 	void dump(BlockDumper &bd);
 
 	BTree &fstree() { return m_fs_tree; }
 	BTree &fexttree() { return m_fext_tree; }
+	BTree &snapmetatree() { return m_snap_meta_tree; }
 	uint32_t getTextFormat() const { return m_sb.apfs_incompatible_features & 0x9; }
 
 	ApfsContainer &getContainer() const { return m_container; }

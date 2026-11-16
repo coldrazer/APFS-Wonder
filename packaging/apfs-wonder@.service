@@ -1,0 +1,14 @@
+[Unit]
+Description=APFS-Wonder Read-Only FUSE Mount for /dev/%i
+Documentation=https://github.com/coldrazer/APFS-Wonder
+After=local-fs.target
+
+[Service]
+Type=forking
+ExecStartPre=/bin/mkdir -p /mnt/apfs-%i
+ExecStart=/usr/local/bin/apfs-fuse -o allow_other,all_vols /dev/%i /mnt/apfs-%i
+ExecStop=/bin/umount /mnt/apfs-%i
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

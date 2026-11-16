@@ -58,7 +58,6 @@ struct IndexNode
 
 constexpr int SECTOR_SIZE = 0x200;
 constexpr size_t NODE_SIZE = 0x1000;
-constexpr size_t BAND_SIZE = 0x100000;
 constexpr uint32_t SPRS_SIGNATURE = 0x73707273;
 
 DeviceSparseImage::DeviceSparseImage()

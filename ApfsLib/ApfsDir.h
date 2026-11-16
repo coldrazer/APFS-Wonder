@@ -119,18 +119,31 @@ public:
 		j_xattr_dstream_t xstrm;
 	};
 
+	struct FileDataHash
+	{
+		uint64_t lba;
+		uint16_t hashed_len;
+		std::vector<uint8_t> hash;
+	};
+
 
 	ApfsDir(ApfsVolume &vol);
 	~ApfsDir();
+
+	ApfsVolume &GetVolume() { return m_vol; }
 
 	bool GetInode(Inode &res, uint64_t inode);
 
 	bool ListDirectory(std::vector<DirRec> &dir, uint64_t inode);
 	bool LookupName(DirRec &res, uint64_t parent_id, const char *name);
 	bool ReadFile(void *data, uint64_t inode, uint64_t offs, size_t size);
+	bool ReadFileSmart(std::vector<uint8_t> &out_data, uint64_t ino, const Inode &rec);
+	bool ResolvePath(const std::string &path, uint64_t &out_ino, Inode &out_rec, ApfsDir *companion_data_dir = nullptr, bool *out_in_companion = nullptr, int depth = 0);
 	bool ListAttributes(std::vector<std::string> &names, uint64_t inode);
 	bool GetAttribute(std::vector<uint8_t> &data, uint64_t inode, const char *name);
 	bool GetAttributeInfo(XAttr &attr, uint64_t inode, const char *name);
+	bool ListFileDataHashes(std::vector<FileDataHash> &hashes, uint64_t private_id);
+	bool VerifyFileIntegrity(uint64_t ino, uint64_t &verified_bytes, uint64_t &hash_records_checked);
 
 private:
 	static int CompareStdDirKey(const void *skey, size_t skey_len, const void *ekey, size_t ekey_len, void *context);

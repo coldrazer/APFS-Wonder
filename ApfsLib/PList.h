@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+#include <string>
+#include <exception>
 #include <vector>
 #include <map>
 #include <memory>

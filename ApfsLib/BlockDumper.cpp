@@ -270,6 +270,12 @@ BlockDumper::BlockDumper(std::ostream &os, size_t blocksize) :
 
 BlockDumper::~BlockDumper()
 {
+	(void)fd_obj_type;
+	(void)fd_cpm_flags;
+	(void)fd_om_flags;
+	(void)fd_j_inode_mode;
+	(void)fd_x_flags;
+	(void)fd_snap_meta_flags;
 }
 
 void BlockDumper::DumpNode(const uint8_t *block, uint64_t blk_nr)
@@ -1220,6 +1226,9 @@ void BlockDumper::DumpBTEntry_GBitmap(const void *key_ptr, size_t key_len, const
 
 void BlockDumper::DumpBTEntry_FusionMT(const void* key_ptr, size_t key_len, const void* val_ptr, size_t val_len, bool index)
 {
+	(void)key_len;
+	(void)val_len;
+
 	const fusion_mt_key_t *key = reinterpret_cast<const fusion_mt_key_t *>(key_ptr);
 
 	m_os << key->paddr << " => ";
@@ -1238,6 +1247,9 @@ void BlockDumper::DumpBTEntry_FusionMT(const void* key_ptr, size_t key_len, cons
 
 void BlockDumper::DumpBTEntry_FExtTree(const void* key_ptr, size_t key_len, const void* val_ptr, size_t val_len, bool index)
 {
+	(void)key_len;
+	(void)val_len;
+
 	const fext_tree_key_t* key = reinterpret_cast<const fext_tree_key_t*>(key_ptr);
 
 	m_os << key->private_id << ' ' << key->logical_addr << " => ";
@@ -1308,6 +1320,9 @@ void BlockDumper::Dump_XF(const uint8_t * xf_data, size_t xf_size, bool drec)
 			case DREC_EXT_TYPE_SIBLING_ID:
 				m_os << "[SIB_ID] " << *reinterpret_cast<const uint64_t *>(data);
 				break;
+			case DREC_EXT_TYPE_DIR_GEN_COUNT:
+				m_os << "[DIR_GEN_COUNT] " << *reinterpret_cast<const uint32_t *>(data);
+				break;
 			default:
 				m_os << "[!!!UNKNOWN!!!] ";
 				DumpHex(data, e[k].x_size, e[k].x_size);
@@ -1367,6 +1382,18 @@ void BlockDumper::Dump_XF(const uint8_t * xf_data, size_t xf_size, bool drec)
 
 			case INO_EXT_TYPE_RDEV:
 				m_os << "[RDEV] " << *reinterpret_cast<const uint32_t *>(data);
+				break;
+
+			case INO_EXT_TYPE_PURGEABLE_FLAGS:
+				m_os << "[PURGEABLE_FLAGS] " << *reinterpret_cast<const uint64_t *>(data);
+				break;
+
+			case INO_EXT_TYPE_ORIG_SYNC_ROOT_ID:
+				m_os << "[ORIG_SYNC_ROOT_ID] " << *reinterpret_cast<const uint64_t *>(data);
+				break;
+
+			case INO_EXT_TYPE_CLONEGROUP_ID:
+				m_os << "[CLONEGROUP_ID] " << *reinterpret_cast<const uint64_t *>(data);
 				break;
 
 			default:
@@ -1446,8 +1473,20 @@ void BlockDumper::DumpBlk_APSB()
 	m_os << "integrity_meta_oi: " << setw(16) << sb->apfs_integrity_meta_oid << endl;
 	m_os << "fext_tree_oid    : " << setw(16) << sb->apfs_fext_tree_oid << endl;
 	m_os << "fext_tree_type   : " << setw(8) << sb->apfs_fext_tree_type << endl;
-	m_os << "reserved_type    : " << setw(8) << sb->reserved_type << endl;
-	m_os << "reserved_oid     : " << setw(16) << sb->reserved_oid << endl;
+	m_os << "pfkur_tree_type  : " << setw(8) << sb->apfs_pfkur_tree_type << endl;
+	m_os << "pfkur_tree_oid   : " << setw(16) << sb->apfs_pfkur_tree_oid << endl;
+	m_os << "doc_id_index_xid : " << setw(16) << sb->apfs_doc_id_index_xid << endl;
+	m_os << "doc_id_idx_flags : " << setw(8) << sb->apfs_doc_id_index_flags << endl;
+	m_os << "doc_id_tree_type : " << setw(8) << sb->apfs_doc_id_tree_type << endl;
+	m_os << "doc_id_tree_oid  : " << setw(16) << sb->apfs_doc_id_tree_oid << endl;
+	m_os << "prev_doc_id_tree : " << setw(16) << sb->apfs_prev_doc_id_tree_oid << endl;
+	m_os << "doc_id_fixup_cur : " << setw(16) << sb->apfs_doc_id_fixup_cursor << endl;
+	m_os << "sec_root_tree_o  : " << setw(16) << sb->apfs_sec_root_tree_oid << endl;
+	m_os << "sec_root_tree_t  : " << setw(8) << sb->apfs_sec_root_tree_type << endl;
+	m_os << "clonegrp_flags   : " << setw(8) << sb->apfs_clonegroup_tree_flags << endl;
+	m_os << "clonegrp_tree_o  : " << setw(16) << sb->apfs_clonegroup_tree_oid << endl;
+	m_os << "clonegrp_tree_t  : " << setw(8) << sb->apfs_clonegroup_tree_type << endl;
+	m_os << "clonegrp_next_id : " << setw(16) << sb->apfs_clonegroup_next_id << endl;
 
 	m_os << endl;
 

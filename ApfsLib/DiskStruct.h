@@ -483,8 +483,28 @@ struct apfs_superblock_t {
 	le_oid_t apfs_fext_tree_oid;
 	le_uint32_t apfs_fext_tree_type;
 
-	le_uint32_t reserved_type;
-	le_oid_t reserved_oid;
+	union {
+		le_uint32_t reserved_type;
+		le_uint32_t apfs_pfkur_tree_type;
+	};
+	union {
+		le_oid_t reserved_oid;
+		le_oid_t apfs_pfkur_tree_oid;
+	};
+
+	le_xid_t apfs_doc_id_index_xid;
+	le_uint32_t apfs_doc_id_index_flags;
+	le_uint32_t apfs_doc_id_tree_type;
+	le_oid_t apfs_doc_id_tree_oid;
+	le_oid_t apfs_prev_doc_id_tree_oid;
+	le_uint64_t apfs_doc_id_fixup_cursor;
+	le_oid_t apfs_sec_root_tree_oid;
+	le_uint32_t apfs_sec_root_tree_type;
+	le_uint32_t apfs_clonegroup_tree_flags;
+	le_oid_t apfs_clonegroup_tree_oid;
+	le_uint32_t apfs_clonegroup_tree_type;
+	le_uint32_t apfs_clonegroup_tree_reserved;
+	le_uint64_t apfs_clonegroup_next_id;
 };
 
 
@@ -815,23 +835,35 @@ struct x_field_t {
 
 enum {
 	DREC_EXT_TYPE_SIBLING_ID = 1,
+	DREC_EXT_TYPE_DIR_GEN_COUNT = 2,
 
 	INO_EXT_TYPE_SNAP_XID = 1,
 	INO_EXT_TYPE_DELTRA_TREE_OID = 2,
+	INO_EXT_TYPE_DELTA_TREE_OID = 2,
 	INO_EXT_TYPE_DOCUMENT_ID = 3,
 	INO_EXT_TYPE_NAME = 4,
 	INO_EXT_TYPE_PREV_FSIZE = 5,
 	INO_EXT_TYPE_RESERVED_6 = 6,
+	INO_EXT_TYPE_FILE_DATA = 6,
 	INO_EXT_TYPE_FINDER_INFO = 7,
 	INO_EXT_TYPE_DSTREAM = 8,
 	INO_EXT_TYPE_RESERVED_9 = 9,
+	INO_EXT_TYPE_VOLNAME = 9,
 	INO_EXT_TYPE_DIR_STATS_KEY = 10,
 	INO_EXT_TYPE_FS_UUID = 11,
 	INO_EXT_TYPE_RESERVED_12 = 12,
+	INO_EXT_TYPE_UNRAW_SIZE = 12,
 	INO_EXT_TYPE_SPARSE_BYTES = 13,
 	INO_EXT_TYPE_RDEV = 14,
 	INO_EXT_TYPE_PURGEABLE_FLAGS = 15,
-	INO_EXT_TYPE_ORIG_SYNC_ROOT_ID = 16
+	INO_EXT_TYPE_ORIG_SYNC_ROOT_ID = 16,
+	INO_EXT_TYPE_CONFORMANCE_NLINK = 17,
+	INO_EXT_TYPE_SOURCE_PURGE_ID = 18,
+	INO_EXT_TYPE_ATTRIBUTION_TAG = 19,
+	INO_EXT_TYPE_SPEC_TELEM_FLAGS = 20,
+	INO_EXT_TYPE_CLONEGROUP_ID = 21,
+	INO_EXT_TYPE_SAF_DIR_STATS_KEY = 22,
+	INO_EXT_TYPE_STRICT_CLASS_F = 23
 };
 
 constexpr uint8_t XF_DATA_DEPENDENT = 0x01;

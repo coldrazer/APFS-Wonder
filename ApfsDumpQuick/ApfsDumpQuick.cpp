@@ -55,7 +55,10 @@ int main(int argc, char *argv[])
 	if (!strcmp(argv[2], "-f"))
 	{
 		if (argc < 5)
+		{
 			std::cerr << "Syntax: apfs-dump-quick <main-device> [-f fusion-secondary-device] <Logfile.txt>" << std::endl;
+			return -1;
+		}
 
 		tier2_name = argv[3];
 		output_name = argv[4];

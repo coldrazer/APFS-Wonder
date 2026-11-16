@@ -20,6 +20,7 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <sstream>
 
 #include <cassert>
 #include <cstring>
@@ -28,7 +29,9 @@
 #include "ApfsVolume.h"
 #include "ApfsContainer.h"
 #include "BTree.h"
+#include "Decmpfs.h"
 #include "Util.h"
+#include <Crypto/Sha256.h>
 
 #ifndef _MSC_VER
 template<size_t L>
@@ -124,7 +127,7 @@ ApfsDir::Inode::Inode(const ApfsDir::Inode& o)
 	// j_dir_stats_val_t dir_stats;
 	memcpy(fs_uuid, o.fs_uuid, sizeof(apfs_uuid_t));
 	sparse_bytes = o.sparse_bytes;
-	document_id = o.document_id;;
+	document_id = o.document_id;
 	rdev = o.rdev;
 	name = o.name;
 
@@ -284,8 +287,26 @@ bool ApfsDir::GetInode(ApfsDir::Inode& res, uint64_t inode)
 				res.sparse_bytes = bswap_le(*reinterpret_cast<const uint64_t *>(xdata));
 				res.optional_present_flags |= Inode::INO_HAS_SPARSE_BYTES;
 				break;
+			case INO_EXT_TYPE_RDEV:
+				assert(xf[n].x_size == sizeof(uint32_t));
+				res.rdev = bswap_le(*reinterpret_cast<const uint32_t *>(xdata));
+				res.optional_present_flags |= Inode::INO_HAS_RDEV;
+				break;
+			case INO_EXT_TYPE_FILE_DATA:
+			case INO_EXT_TYPE_VOLNAME:
+			case INO_EXT_TYPE_UNRAW_SIZE:
+			case INO_EXT_TYPE_PURGEABLE_FLAGS:
+			case INO_EXT_TYPE_ORIG_SYNC_ROOT_ID:
+			case INO_EXT_TYPE_CONFORMANCE_NLINK:
+			case INO_EXT_TYPE_SOURCE_PURGE_ID:
+			case INO_EXT_TYPE_ATTRIBUTION_TAG:
+			case INO_EXT_TYPE_SPEC_TELEM_FLAGS:
+			case INO_EXT_TYPE_CLONEGROUP_ID:
+			case INO_EXT_TYPE_SAF_DIR_STATS_KEY:
+			case INO_EXT_TYPE_STRICT_CLASS_F:
+				break;
 			default:
-				std::cerr << "Warning: Unknown XF " << xf[n].x_type << " at inode " << inode << std::endl;
+				std::cerr << "Warning: Unknown XF " << static_cast<int>(xf[n].x_type) << " at inode " << inode << std::endl;
 				break;
 			}
 
@@ -392,8 +413,10 @@ bool ApfsDir::ListDirectory(std::vector<DirRec> &dir, uint64_t inode)
 					e.sibling_id = bswap_le(*reinterpret_cast<const uint64_t *>(xdata));
 					e.has_sibling_id = true;
 					break;
+				case DREC_EXT_TYPE_DIR_GEN_COUNT:
+					break;
 				default:
-					std::cerr << "Warning: Unknown XF " << xf[n].x_type << " at drec " << e.file_id << std::endl;
+					std::cerr << "Warning: Unknown XF " << static_cast<int>(xf[n].x_type) << " at drec " << e.file_id << std::endl;
 					break;
 				}
 
@@ -505,6 +528,9 @@ bool ApfsDir::ReadFile(void* data, uint64_t inode, uint64_t offs, size_t size)
 
 			fext_key = reinterpret_cast<const fext_tree_key_t *>(e.key);
 			fext_val = reinterpret_cast<const fext_tree_val_t *>(e.val);
+
+			if (fext_key->private_id != key.private_id)
+				return false;
 
 			extent_offs = offs - fext_key->logical_addr;
 
@@ -740,6 +766,197 @@ bool ApfsDir::GetAttributeInfo(ApfsDir::XAttr& attr, uint64_t inode, const char*
 	return true;
 }
 
+bool ApfsDir::ReadFileSmart(std::vector<uint8_t> &out_data, uint64_t ino, const Inode &rec)
+{
+	out_data.clear();
+	if (rec.bsd_flags & APFS_UF_COMPRESSED)
+	{
+		std::vector<uint8_t> attr;
+		if (!GetAttribute(attr, ino, "com.apple.decmpfs"))
+			return false;
+		return DecompressFile(*this, ino, out_data, attr);
+	}
+
+	if (rec.optional_present_flags & Inode::INO_HAS_DSTREAM)
+	{
+		out_data.resize(rec.ds_size);
+		if (rec.ds_size == 0)
+			return true;
+		return ReadFile(out_data.data(), rec.private_id, 0, rec.ds_size);
+	}
+
+	return true;
+}
+
+bool ApfsDir::ResolvePath(const std::string &path, uint64_t &out_ino, Inode &out_rec, ApfsDir *companion_data_dir, bool *out_in_companion, int depth)
+{
+	if (depth > 16)
+		return false;
+
+	if (out_in_companion)
+		*out_in_companion = false;
+
+	uint64_t cur_ino = ROOT_DIR_INO_NUM;
+	if (!GetInode(out_rec, cur_ino))
+		return false;
+
+	std::vector<std::string> components;
+	std::stringstream ss(path);
+	std::string part;
+	while (std::getline(ss, part, '/'))
+	{
+		if (part.empty() || part == ".")
+			continue;
+		if (part == "..")
+		{
+			if (!components.empty())
+				components.pop_back();
+			continue;
+		}
+		components.push_back(part);
+	}
+
+	for (size_t i = 0; i < components.size(); ++i)
+	{
+		DirRec drec;
+		if (!LookupName(drec, cur_ino, components[i].c_str()))
+			return false;
+
+		cur_ino = drec.file_id;
+		if (!GetInode(out_rec, cur_ino))
+			return false;
+
+		// Check if firmlink and companion Data volume is provided
+		if ((out_rec.bsd_flags & APFS_SF_FIRMLINK) && companion_data_dir)
+		{
+			std::vector<uint8_t> fl_data;
+			if (GetAttribute(fl_data, cur_ino, FIRMLINK_EA_NAME) && !fl_data.empty())
+			{
+				std::string target(reinterpret_cast<const char *>(fl_data.data()));
+				for (size_t j = i + 1; j < components.size(); ++j)
+				{
+					if (target.empty() || target.back() != '/')
+						target.push_back('/');
+					target.append(components[j]);
+				}
+				if (out_in_companion)
+					*out_in_companion = true;
+				return companion_data_dir->ResolvePath(target, out_ino, out_rec, nullptr, nullptr, depth + 1);
+			}
+		}
+
+		// Follow intermediate symlinks
+		if ((out_rec.mode & MODE_S_IFMT) == MODE_S_IFLNK && (i + 1) < components.size())
+		{
+			std::vector<uint8_t> sym_data;
+			if (!GetAttribute(sym_data, cur_ino, SYMLINK_EA_NAME) || sym_data.empty())
+				return false;
+			std::string target(reinterpret_cast<const char *>(sym_data.data()));
+			for (size_t j = i + 1; j < components.size(); ++j)
+			{
+				if (target.empty() || target.back() != '/')
+					target.push_back('/');
+				target.append(components[j]);
+			}
+			return ResolvePath(target, out_ino, out_rec, companion_data_dir, out_in_companion, depth + 1);
+		}
+	}
+
+	out_ino = cur_ino;
+	return true;
+}
+
+bool ApfsDir::ListFileDataHashes(std::vector<FileDataHash> &hashes, uint64_t private_id)
+{
+	hashes.clear();
+	j_file_info_key_t skey;
+	skey.hdr.obj_id_and_type = APFS_TYPE_ID(APFS_TYPE_FILE_INFO, private_id);
+	skey.info_and_lba = 0;
+
+	BTreeIterator it;
+	BTreeEntry bte;
+	if (!m_fs_tree.GetIterator(it, &skey, sizeof(skey), CompareStdDirKey, this))
+		return false;
+
+	for (;;)
+	{
+		if (!it.GetEntry(bte))
+			break;
+
+		const j_file_info_key_t *k = reinterpret_cast<const j_file_info_key_t *>(bte.key);
+		if (k->hdr.obj_id_and_type != skey.hdr.obj_id_and_type)
+			break;
+
+		uint8_t info_type = static_cast<uint8_t>((k->info_and_lba & J_FILE_INFO_TYPE_MASK) >> J_FILE_INFO_TYPE_SHIFT);
+		if (info_type == APFS_FILE_INFO_DATA_HASH && bte.val_len >= sizeof(j_file_data_hash_val_t))
+		{
+			const j_file_info_val_t *v = reinterpret_cast<const j_file_info_val_t *>(bte.val);
+			if (sizeof(j_file_data_hash_val_t) + v->dhash.hash_size <= bte.val_len)
+			{
+				FileDataHash fdh;
+				fdh.lba = k->info_and_lba & J_FILE_INFO_LBA_MASK;
+				fdh.hashed_len = v->dhash.hashed_len;
+				fdh.hash.assign(v->dhash.hash, v->dhash.hash + v->dhash.hash_size);
+				hashes.push_back(fdh);
+			}
+		}
+
+		if (!it.next())
+			break;
+	}
+
+	return true;
+}
+
+bool ApfsDir::VerifyFileIntegrity(uint64_t ino, uint64_t &verified_bytes, uint64_t &hash_records_checked)
+{
+	verified_bytes = 0;
+	hash_records_checked = 0;
+
+	Inode rec;
+	if (!GetInode(rec, ino))
+		return false;
+
+	if ((rec.mode & MODE_S_IFMT) != MODE_S_IFREG)
+		return true;
+
+	std::vector<uint8_t> data;
+	if (!ReadFileSmart(data, ino, rec))
+		return false;
+
+	verified_bytes = data.size();
+
+	std::vector<FileDataHash> hashes;
+	ListFileDataHashes(hashes, rec.private_id);
+	hash_records_checked = hashes.size();
+
+	if (!hashes.empty() && !(rec.bsd_flags & APFS_UF_COMPRESSED))
+	{
+		for (const auto &h : hashes)
+		{
+			uint64_t byte_off = h.lba * m_blksize;
+			size_t len = static_cast<size_t>(h.hashed_len) * m_blksize;
+			if (byte_off >= data.size())
+				continue;
+			if (byte_off + len > data.size())
+				len = data.size() - static_cast<size_t>(byte_off);
+
+			if (h.hash.size() == 32)
+			{
+				SHA256 sha;
+				uint8_t digest[32];
+				sha.Init();
+				sha.Update(data.data() + byte_off, len);
+				sha.Final(digest);
+				if (memcmp(digest, h.hash.data(), 32) != 0)
+					return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 int ApfsDir::CompareStdDirKey(const void *skey, size_t skey_len, const void *ekey, size_t ekey_len, void *context)
 {
 	// assert(skey_len == 8);
@@ -832,6 +1049,10 @@ int ApfsDir::CompareStdDirKey(const void *skey, size_t skey_len, const void *eke
 
 int ApfsDir::CompareFextKey(const void* skey, size_t skey_len, const void* ekey, size_t ekey_len, void* context)
 {
+	(void)skey_len;
+	(void)ekey_len;
+	(void)context;
+
 	const fext_tree_key_t *s = reinterpret_cast<const fext_tree_key_t *>(skey);
 	const fext_tree_key_t *e = reinterpret_cast<const fext_tree_key_t *>(ekey);
 
